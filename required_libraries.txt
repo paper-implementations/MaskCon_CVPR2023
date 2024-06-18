@@ -1,0 +1,14 @@
+# These are the packages requires to be installed in this conda Environment
+# To install the packages, run the following command in the terminal
+# pip install -r required_libraries.txt
+#               or
+# pip install -r required_libraries.txt -y
+jupyter
+ipython
+ipykernel
+numpy
+wandb
+tqdm
+Pillow
+scipy
+install scikit-learn

@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torchvision.models import resnet
+from sklearn.manifold import TSNE
 
 dim_dict = {
     'resnet18': 512,

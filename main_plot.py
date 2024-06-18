@@ -14,14 +14,14 @@ from datasets import *
 from models import *
 from utils import *
 from sklearn.manifold import TSNE
-import matplotlib.pyplot as plt
+from torchviz import make_dot
 
 """### Set arguments"""
 
 parser = argparse.ArgumentParser(description='Masked contrastive learning.')
 
 # training config:
-parser.add_argument('--dataset', default='cifartoy_good', choices=['cifar100', 'cifartoy_bad', 'cifartoy_good', 'cars196', 'sop_split1', 'sop_split2', 'imagenet32'], type=str, help='train dataset')
+parser.add_argument('--dataset', default='cifar100', choices=['cifar100', 'cifartoy_bad', 'cifartoy_good', 'cars196', 'sop_split1', 'sop_split2', 'imagenet32'], type=str, help='train dataset')
 parser.add_argument('--data_path', default='./data', type=str, help='train dataset')
 
 # model configs: [Almost fixed for all experiments]
@@ -33,7 +33,6 @@ parser.add_argument('--t0', default=0.1, type=float, help='softmax temperature f
 
 # train configs:
 parser.add_argument('--lr', '--learning-rate', default=0.02, type=float, metavar='LR', help='initial learning rate', dest='lr')
-# parser.add_argument('--epochs', default=200, type=int, metavar='N', help='number of total epochs')
 parser.add_argument('--epochs', default=200, type=int, metavar='N', help='number of total epochs')
 parser.add_argument('--warm_up', default=5, type=int, metavar='N', help='number of warmup epochs')
 parser.add_argument('--batch_size', default=128, type=int, metavar='N', help='mini-batch size')
@@ -85,30 +84,20 @@ def train(net, data_loader, train_optimizer, epoch, args):
     return losses / total_num
 
 
-def retrieval(encoder, test_loader, K, args, epoch, chunks=10, num_samples=1000):
+def retrieval(encoder, test_loader, K, chunks=10):
     encoder.eval()
     feature_bank, target_bank = [], []
     with torch.no_grad():
+        # for i, (image, _, fine_label) in enumerate(tqdm(test_loader, desc='Retrieval ...')):
         for i, (image, _, fine_label) in enumerate(test_loader):
             image = image.cuda(non_blocking=True)
             label = fine_label.cuda(non_blocking=True)
             output = encoder(image, feat=True)
             feature_bank.append(output)
             target_bank.append(label)
-        
-        feature = torch.cat(feature_bank, dim=0)
+
+        feature = F.normalize(torch.cat(feature_bank, dim=0), dim=1)
         label = torch.cat(target_bank, dim=0).contiguous()
-        
-        # Randomly select a subset of samples
-        indices = torch.randperm(feature.size(0))[:num_samples]
-        feature_subset = feature[indices]
-        label_subset = label[indices]
-        
-        # Apply t-SNE on the subset of features
-        tsne = TSNE(n_components=2, random_state=0)
-        tsne_features = tsne.fit_transform(feature_subset.cpu().numpy())
-        tsne_labels = label_subset.cpu().numpy()
-    
     label = label.unsqueeze(-1)
     feat_norm = F.normalize(feature, dim=1)
     split = torch.tensor(np.linspace(0, len(feat_norm), chunks + 1, dtype=int), dtype=torch.long).to(feature.device)
@@ -140,15 +129,14 @@ def retrieval(encoder, test_loader, K, args, epoch, chunks=10, num_samples=1000)
             acc_k = float((correct[k] > 0).int().sum() / num_sample)
             recall[k] = acc_k
 
-    # Plot t-SNE
-    plt.figure(figsize=(8, 8))
-    colors = plt.cm.rainbow(np.linspace(0, 1, len(np.unique(tsne_labels))))
-    for label, color in zip(np.unique(tsne_labels), colors):
-        mask = tsne_labels == label
-        plt.scatter(tsne_features[mask, 0], tsne_features[mask, 1], color=color, label=label)
-    
-    plt.legend()
-    plt.savefig(f'{args.wandb_id}/{args.results_dir}/tsne-epoch-{epoch}.png')
+        ##################################################################
+        # calculate precision @ K
+        # precision = [[] for i in K]
+        # num_sample = len(feat_norm)
+        # for k, i in enumerate(K):
+        #     acc_k = float((correct[k]).int().sum() / num_sample)
+        #     precision[k] = acc_k / i
+        ##################################################################
 
     return recall
 
@@ -178,9 +166,8 @@ def main_proc(args, model, train_loader, test_loader):
     model.initiate_memorybank(train_loader)
 
     for epoch in range(epoch_start, args.epochs):
-        # retrieval_topk, tsne_features, tsne_labels = retrieval(model.encoder_q, test_loader, [0, 1, 2, 3, 4, 5])
         if epoch % 10 == 0:
-            retrieval_topk = retrieval(encoder=model.encoder_q, test_loader=test_loader, K=[1, 2, 5, 10, 50, 100], args=args, epoch=epoch, chunks=10)
+            retrieval_topk = retrieval(model.encoder_q, test_loader, [1, 2, 5, 10, 50, 100])
             retrieval_top1, retrieval_top2, retrieval_top5, retrieval_top10, retrieval_top50, retrieval_top100 = retrieval_topk
             if retrieval_top1 > best_retrieval_top1:
                 best_retrieval_top1 = best_retrieval_top1
@@ -201,14 +188,6 @@ def main_proc(args, model, train_loader, test_loader):
             train_logs.write(
                 f'Epoch [{epoch}/{args.epochs}]: R@1: {retrieval_top1:.4f}, R@2: {retrieval_top2:.4f}, R@5: {retrieval_top5:.4f}, R@10: {retrieval_top10:.4f},  R@50: {retrieval_top50:.4f},R@100: {retrieval_top100:.4f}\n')
             train_logs.flush()
-
-            # Save t-SNE features
-            # tsne_features = np.concatenate(tsne_features)
-            # tsne_labels = np.concatenate(tsne_labels.cpu().numpy())
-            # tsne_labels = np.concatenate(tsne_labels)
-
-            # tsne_features = np.concatenate([feat.cpu().numpy() for feat in tsne_features])
-            # tsne_labels = np.concatenate([label.cpu().numpy() for label in tsne_labels])
 
         train(model, train_loader, optimizer, epoch, args)
     wandb.finish()
@@ -291,7 +270,11 @@ def main():
     if not os.path.exists(f'{args.wandb_id}/{args.results_dir}'):
         os.mkdir(f'{args.wandb_id}/{args.results_dir}')
 
-    main_proc(args, trainer, train_loader, test_loader)
+    # main_proc(args, trainer, train_loader, test_loader)
+    print(trainer)
+    
+
+    # make_dot(yhat, params=dict(list(model.named_parameters()))).render("rnn_torchviz", format="png")
 
 
 if __name__ == '__main__':

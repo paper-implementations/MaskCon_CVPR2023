@@ -1,0 +1,5 @@
+logs/*
+data/*
+makscon/*
+wandb/*
+__pycache__

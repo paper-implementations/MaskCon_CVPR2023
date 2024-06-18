@@ -34,7 +34,7 @@ parser.add_argument('--t0', default=0.1, type=float, help='softmax temperature f
 # train configs:
 parser.add_argument('--lr', '--learning-rate', default=0.02, type=float, metavar='LR', help='initial learning rate', dest='lr')
 # parser.add_argument('--epochs', default=200, type=int, metavar='N', help='number of total epochs')
-parser.add_argument('--epochs', default=200, type=int, metavar='N', help='number of total epochs')
+parser.add_argument('--epochs', default=10, type=int, metavar='N', help='number of total epochs')
 parser.add_argument('--warm_up', default=5, type=int, metavar='N', help='number of warmup epochs')
 parser.add_argument('--batch_size', default=128, type=int, metavar='N', help='mini-batch size')
 parser.add_argument('--wd', default=5e-4, type=float, metavar='W', help='weight decay')
@@ -85,7 +85,7 @@ def train(net, data_loader, train_optimizer, epoch, args):
     return losses / total_num
 
 
-def retrieval(encoder, test_loader, K, args, epoch, chunks=10, num_samples=1000):
+def retrieval(encoder, test_loader, K, args, epoch, chunks=10):
     encoder.eval()
     feature_bank, target_bank = [], []
     with torch.no_grad():
@@ -99,15 +99,10 @@ def retrieval(encoder, test_loader, K, args, epoch, chunks=10, num_samples=1000)
         feature = torch.cat(feature_bank, dim=0)
         label = torch.cat(target_bank, dim=0).contiguous()
         
-        # Randomly select a subset of samples
-        indices = torch.randperm(feature.size(0))[:num_samples]
-        feature_subset = feature[indices]
-        label_subset = label[indices]
-        
-        # Apply t-SNE on the subset of features
+        # Apply t-SNE on the output features
         tsne = TSNE(n_components=2, random_state=0)
-        tsne_features = tsne.fit_transform(feature_subset.cpu().numpy())
-        tsne_labels = label_subset.cpu().numpy()
+        tsne_features = tsne.fit_transform(feature.cpu().numpy())
+        tsne_labels = label.cpu().numpy()
     
     label = label.unsqueeze(-1)
     feat_norm = F.normalize(feature, dim=1)
@@ -178,9 +173,9 @@ def main_proc(args, model, train_loader, test_loader):
     model.initiate_memorybank(train_loader)
 
     for epoch in range(epoch_start, args.epochs):
+        retrieval_topk = retrieval(encoder=model.encoder_q, test_loader=test_loader, K=[1, 2, 5, 10, 50, 100], args=args, epoch=epoch, chunks=10)
         # retrieval_topk, tsne_features, tsne_labels = retrieval(model.encoder_q, test_loader, [0, 1, 2, 3, 4, 5])
-        if epoch % 10 == 0:
-            retrieval_topk = retrieval(encoder=model.encoder_q, test_loader=test_loader, K=[1, 2, 5, 10, 50, 100], args=args, epoch=epoch, chunks=10)
+        if epoch % 1 == 0:
             retrieval_top1, retrieval_top2, retrieval_top5, retrieval_top10, retrieval_top50, retrieval_top100 = retrieval_topk
             if retrieval_top1 > best_retrieval_top1:
                 best_retrieval_top1 = best_retrieval_top1
