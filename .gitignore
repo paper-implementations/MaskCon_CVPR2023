@@ -1,5 +1,10 @@
-logs/*
 data/*
 makscon/*
 wandb/*
 __pycache__
+logs
+OUTPUT-*.ipynb
+**/weight/*
+*_stderr.txt
+*_stdout.txt
+# *stdout.txt

@@ -11,4 +11,6 @@ wandb
 tqdm
 Pillow
 scipy
-install scikit-learn
+scikit-learn
+matplotlib
+numpy
